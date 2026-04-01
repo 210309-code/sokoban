@@ -1,0 +1,603 @@
+<!DOCTYPE html> 
+
+<html lang="en"> 
+
+<head> 
+
+  <meta charset="UTF-8"> 
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+
+  <title>Random Sokoban HTML Game</title> 
+
+  <style> 
+
+    html, body { 
+
+      height: 100%; 
+
+      margin: 0; 
+
+    } 
+
+ 
+
+    body { 
+
+      background: #ded6ae; 
+
+      display: flex; 
+
+      align-items: center; 
+
+      justify-content: center; 
+
+    } 
+
+  </style> 
+
+</head> 
+
+<body> 
+
+<canvas id="game" width="400" height="400"></canvas> 
+
+<script> 
+
+const canvas = document.getElementById('game'); 
+
+const context = canvas.getContext('2d'); 
+
+ 
+
+const grid = 64; // Grid size 
+
+const types = { 
+
+  wall: '#', 
+
+  player: '@', 
+
+  playerOnGoal: '+', 
+
+  block: '$', 
+
+  blockOnGoal: '*', 
+
+  goal: '.', 
+
+  empty: ' ' 
+
+}; 
+
+ 
+
+let playerPos = { row: 0, col: 0 }; 
+
+let playerDir = { row: 0, col: 0 }; 
+
+let rAF = null; 
+
+let width = 0; 
+
+let cells = []; 
+
+let gameWon = false; 
+
+ 
+
+// Check if a cell is far enough from walls 
+
+function isFarFromWall(row, col) { 
+
+  // Ensure the cell is at least 2 grid spaces away from any wall 
+
+  const directions = [ 
+
+    { row: -1, col: 0 }, { row: 1, col: 0 }, 
+
+    { row: 0, col: -1 }, { row: 0, col: 1 } 
+
+  ]; 
+
+ 
+
+  for (let dir of directions) { 
+
+    const newRow = row + dir.row; 
+
+    const newCol = col + dir.col; 
+
+    if (cells[newRow] && cells[newRow][newCol] === types.wall) { 
+
+      return false; // Too close to a wall 
+
+    } 
+
+  } 
+
+  return true; 
+
+} 
+
+ 
+
+// Ensure the blocks are placed with a distance greater than 1 between them 
+
+function isFarFromOtherBlocks(row, col) { 
+
+  const directions = [ 
+
+    { row: -1, col: 0 }, { row: 1, col: 0 }, 
+
+    { row: 0, col: -1 }, { row: 0, col: 1 } 
+
+  ]; 
+
+ 
+
+  for (let dir of directions) { 
+
+    const newRow = row + dir.row; 
+
+    const newCol = col + dir.col; 
+
+    if (cells[newRow] && cells[newRow][newCol] === types.block) { 
+
+      return false; // Too close to another block 
+
+    } 
+
+  } 
+
+  return true; 
+
+} 
+
+ 
+
+// Generate the game level with updated block placement logic 
+
+function generateLevel(rows, cols) { 
+
+  cells = Array.from({ length: rows }, () => Array(cols).fill(types.empty)); 
+
+ 
+
+  // Randomly generate walls 
+
+  for (let row = 0; row < rows; row++) { 
+
+    for (let col = 0; col < cols; col++) { 
+
+      if (Math.random() < 0.2) { 
+
+        cells[row][col] = types.wall; 
+
+      } 
+
+    } 
+
+  } 
+
+ 
+
+  // Boundaries are always walls 
+
+  for (let row = 0; row < rows; row++) { 
+
+    cells[row][0] = cells[row][cols - 1] = types.wall; 
+
+  } 
+
+  for (let col = 0; col < cols; col++) { 
+
+    cells[0][col] = cells[rows - 1][col] = types.wall; 
+
+  } 
+
+ 
+
+  // Place the player 
+
+  let playerPlaced = false; 
+
+  while (!playerPlaced) { 
+
+    const row = Math.floor(Math.random() * rows); 
+
+    const col = Math.floor(Math.random() * cols); 
+
+    if (cells[row][col] === types.empty) { 
+
+      cells[row][col] = types.player; 
+
+      playerPos = { row, col }; 
+
+      playerPlaced = true; 
+
+    } 
+
+  } 
+
+ 
+
+  // Randomly determine number of blocks and goals (between 2 and 4) 
+
+  const blockCount = Math.floor(Math.random() * 3) + 2; 
+
+  const goalCount = blockCount; 
+
+ 
+
+  // Place the goals ensuring they are far from walls 
+
+  let goalPositions = []; 
+
+  while (goalPositions.length < goalCount) { 
+
+    const row = Math.floor(Math.random() * rows); 
+
+    const col = Math.floor(Math.random() * cols); 
+
+    if (cells[row][col] === types.empty && isFarFromWall(row, col)) { 
+
+      cells[row][col] = types.goal; 
+
+      goalPositions.push({ row, col }); 
+
+    } 
+
+  } 
+
+ 
+
+  // Place the blocks ensuring they are far from walls and other blocks 
+
+  let blockPositions = []; 
+
+  while (blockPositions.length < blockCount) { 
+
+    const row = Math.floor(Math.random() * rows); 
+
+    const col = Math.floor(Math.random() * cols); 
+
+ 
+
+    // Ensure blocks are placed far from walls and other blocks 
+
+    if (cells[row][col] === types.empty && isFarFromWall(row, col) && isFarFromOtherBlocks(row, col)) { 
+
+      cells[row][col] = types.block; 
+
+      blockPositions.push({ row, col }); 
+
+    } 
+
+  } 
+
+ 
+
+  width = cols; 
+
+  canvas.width = width * grid; 
+
+  canvas.height = rows * grid; 
+
+} 
+
+ 
+
+// Move the player or block 
+
+function move(startPos, endPos) { 
+
+  const startCell = cells[startPos.row][startPos.col]; 
+
+  const endCell = cells[endPos.row][endPos.col]; 
+
+ 
+
+  const isPlayer = startCell === types.player || startCell === types.playerOnGoal; 
+
+ 
+
+  switch(startCell) { 
+
+    case types.player: 
+
+    case types.block: 
+
+      cells[startPos.row][startPos.col] = types.empty; 
+
+      break; 
+
+    case types.playerOnGoal: 
+
+    case types.blockOnGoal: 
+
+      cells[startPos.row][startPos.col] = types.goal; 
+
+      break; 
+
+  } 
+
+ 
+
+  switch(endCell) { 
+
+    case types.empty: 
+
+      cells[endPos.row][endPos.col] = isPlayer ? types.player : types.block; 
+
+      break; 
+
+    case types.goal: 
+
+      cells[endPos.row][endPos.col] = isPlayer ? types.playerOnGoal : types.blockOnGoal; 
+
+      break; 
+
+  } 
+
+} 
+
+ 
+
+// Main game loop 
+
+function loop() { 
+
+  if (gameWon) { 
+
+    cancelAnimationFrame(rAF); // Stop the game loop when the player wins 
+
+    return; 
+
+  } 
+
+ 
+
+  rAF = requestAnimationFrame(loop); 
+
+  context.clearRect(0, 0, canvas.width, canvas.height); 
+
+ 
+
+  const row = playerPos.row + playerDir.row; 
+
+  const col = playerPos.col + playerDir.col; 
+
+  const cell = cells[row][col]; 
+
+  switch(cell) { 
+
+    case types.empty: 
+
+    case types.goal: 
+
+      move(playerPos, { row, col }); 
+
+      playerPos.row = row; 
+
+      playerPos.col = col; 
+
+      break; 
+
+    case types.wall: 
+
+      break; 
+
+    case types.block: 
+
+    case types.blockOnGoal: 
+
+      const nextRow = row + playerDir.row; 
+
+      const nextCol = col + playerDir.col; 
+
+      const nextCell = cells[nextRow][nextCol]; 
+
+ 
+
+      if (nextCell === types.empty || nextCell === types.goal) { 
+
+        move({ row, col }, { row: nextRow, col: nextCol }); 
+
+        move(playerPos, { row, col }); 
+
+        playerPos.row = row; 
+
+        playerPos.col = col; 
+
+      } 
+
+      break; 
+
+  } 
+
+ 
+
+  playerDir = { row: 0, col: 0 }; 
+
+ 
+
+  // Check if all blocks are on the goals 
+
+  let allBlocksOnGoals = true; 
+
+  for (let row = 0; row < cells.length; row++) { 
+
+    for (let col = 0; col < cells[row].length; col++) { 
+
+      if (cells[row][col] === types.block) { 
+
+        allBlocksOnGoals = false; 
+
+        break; 
+
+      } 
+
+    } 
+
+    if (!allBlocksOnGoals) break; 
+
+  } 
+
+ 
+
+  if (allBlocksOnGoals) { 
+
+    gameWon = true; 
+
+  } 
+
+ 
+
+  context.strokeStyle = 'black'; 
+
+  context.lineWidth = 2; 
+
+ 
+
+  // Draw the game world 
+
+  for (let row = 0; row < cells.length; row++) { 
+
+    for (let col = 0; col < cells[row].length; col++) { 
+
+      const cell = cells[row][col]; 
+
+ 
+
+      if (cell === types.wall) { 
+
+        context.fillStyle = '#5b5530'; 
+
+        context.fillRect(col * grid, row * grid, grid, grid); 
+
+      } 
+
+      if (cell === types.block || cell === types.blockOnGoal) { 
+
+        context.fillStyle = cell === types.block ? '#ffbb5b' : '#ba6a15'; 
+
+        context.fillRect(col * grid, row * grid, grid, grid); 
+
+        context.strokeRect(col * grid, row * grid, grid, grid); 
+
+      } 
+
+      if (cell === types.goal || cell === types.playerOnGoal) { 
+
+        context.fillStyle = '#914430'; 
+
+        context.beginPath(); 
+
+        context.arc((col + 0.5) * grid, (row + 0.5) * grid, 10, 0, Math.PI * 2); 
+
+        context.fill(); 
+
+      } 
+
+      if (cell === types.player || cell === types.playerOnGoal) { 
+
+        context.fillStyle = 'black'; 
+
+        context.beginPath(); 
+
+        context.arc((col + 0.5) * grid, (row + 0.3) * grid, 8, 0, Math.PI * 2); 
+
+        context.fill(); 
+
+        context.fillRect((col + 0.48) * grid, (row + 0.3) * grid, 2, grid / 2.5); 
+
+        context.fillRect((col + 0.3) * grid, (row + 0.5) * grid, grid / 2.5, 2); 
+
+        context.moveTo((col + 0.5) * grid, (row + 0.7) * grid); 
+
+        context.lineTo((col + 0.65) * grid, (row + 0.9) * grid); 
+
+        context.moveTo((col + 0.5) * grid, (row + 0.7) * grid); 
+
+        context.lineTo((col + 0.35)* grid, (row + 0.9) * grid); 
+
+        context.stroke(); 
+
+      } 
+
+    } 
+
+  } 
+
+ 
+
+  // Check for victory 
+
+  if (gameWon) { 
+
+    const rectWidth = 200; 
+
+    const rectHeight = 80; 
+
+    const centerX = canvas.width / 2 - rectWidth / 2; 
+
+    const centerY = canvas.height / 2 - rectHeight / 2; 
+
+ 
+
+    context.fillStyle = 'black'; 
+
+    context.fillRect(centerX, centerY, rectWidth, rectHeight); 
+
+ 
+
+    context.fillStyle = 'white'; 
+
+    context.font = 'bold 28px monospace'; 
+
+    context.textAlign = 'center'; 
+
+    context.textBaseline = 'middle'; 
+
+    context.fillText('YOU WIN!', canvas.width / 2, canvas.height / 2); 
+
+  } 
+
+} 
+
+ 
+
+// Handle key events 
+
+document.addEventListener('keydown', function(e) { 
+
+  if (gameWon) return; // Ignore player input if the game is won 
+
+ 
+
+  playerDir = { row: 0, col: 0 }; 
+
+ 
+
+  if (e.which === 37) playerDir.col = -1; 
+
+  if (e.which === 38) playerDir.row = -1; 
+
+  if (e.which === 39) playerDir.col = 1; 
+
+  if (e.which === 40) playerDir.row = 1; 
+
+}); 
+
+ 
+
+generateLevel(10,10); 
+
+requestAnimationFrame(loop); 
+
+</script> 
+
+</body> 
+
+</html> 
